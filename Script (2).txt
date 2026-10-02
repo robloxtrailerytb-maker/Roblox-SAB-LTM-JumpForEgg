@@ -1,0 +1,1332 @@
+-- =====================================================
+-- XEBO LTM Jump For Egg
+-- =====================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TeleportService = game:GetService("TeleportService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+
+local CONFIG = {
+	DEFAULT_FOV = 120,
+	REFRESH_DELAY = 0.8,
+}
+
+-- Valeurs fixes (plus d'UI)
+local GIGA_DURATION = 1000
+local GIGA_SPEED = 1000
+local SNIPE_SPEED = 5000
+local FARM_JUMP_TIME = 0.3
+
+local highlightEnabled = true
+local beamEnabled = true
+local fpsBoostEnabled = true
+local infiniteJumpEnabled = true
+local godModeEnabled = true
+local antiRagdollEnabled = true
+local nameTagsEnabled = true
+local instaPromptEnabled = true
+local noPlayerAnimsEnabled = true
+
+local currentSpeedLock = nil
+local customFOV = CONFIG.DEFAULT_FOV
+
+local currentHighlights = {}
+local currentBeam = nil
+local currentAttachments = {}
+local currentNameTags = {}
+local lastEggModels = {}
+local savedData = {}
+
+local SpeedConnection = nil
+local NoPlayerAnimsConnection = nil
+local spaceHeld = false
+local snipeActive = false
+local gigaJumpActive = false
+
+local autoFarmXPEnabled = false
+local autoFarmLoop = nil
+
+local Keybinds = {
+	GigaJump = Enum.KeyCode.G,
+	AutoFarm = Enum.KeyCode.F,
+	TPGround = Enum.KeyCode.E,
+}
+
+local waitingForRebind = nil
+
+player.CharacterAdded:Connect(function(char)
+	character = char
+	humanoid = char:WaitForChild("Humanoid")
+	humanoidRootPart = char:WaitForChild("HumanoidRootPart")
+	task.wait(0.3)
+	if currentSpeedLock then setSpeedLock(currentSpeedLock) end
+	if infiniteJumpEnabled then setInfiniteJump(true) end
+	if godModeEnabled then applyGodMode() end
+	if antiRagdollEnabled then applyAntiRagdoll() end
+	if noPlayerAnimsEnabled then setNoPlayerAnims(true) end
+end)
+
+-- ====================== GUI ======================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "XeboLTMJumpForEgg"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+
+local fpsLabel = Instance.new("TextLabel")
+fpsLabel.Size = UDim2.new(0, 90, 0, 28)
+fpsLabel.Position = UDim2.new(1, -100, 0, 12)
+fpsLabel.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+fpsLabel.BackgroundTransparency = 0.2
+fpsLabel.Text = "FPS: --"
+fpsLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
+fpsLabel.TextSize = 16
+fpsLabel.Font = Enum.Font.GothamBold
+fpsLabel.ZIndex = 50
+fpsLabel.Parent = screenGui
+Instance.new("UICorner", fpsLabel).CornerRadius = UDim.new(0, 8)
+
+local openPanelBtn = Instance.new("TextButton")
+openPanelBtn.Size = UDim2.new(0, 42, 0, 120)
+openPanelBtn.Position = UDim2.new(1, -50, 0.5, -100)
+openPanelBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+openPanelBtn.BackgroundTransparency = 0.1
+openPanelBtn.Text = "X\nE\nB\nO\n\nL\nT\nM"
+openPanelBtn.TextColor3 = Color3.new(1, 1, 1)
+openPanelBtn.TextSize = 13
+openPanelBtn.Font = Enum.Font.GothamBold
+openPanelBtn.ZIndex = 20
+openPanelBtn.Parent = screenGui
+Instance.new("UICorner", openPanelBtn).CornerRadius = UDim.new(0, 10)
+local openStroke = Instance.new("UIStroke", openPanelBtn)
+openStroke.Color = Color3.fromRGB(0, 200, 120)
+openStroke.Thickness = 2
+
+local openEggBtn = Instance.new("TextButton")
+openEggBtn.Size = UDim2.new(0, 42, 0, 70)
+openEggBtn.Position = UDim2.new(1, -50, 0.5, 40)
+openEggBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+openEggBtn.BackgroundTransparency = 0.1
+openEggBtn.Text = "E\nG\nG"
+openEggBtn.TextColor3 = Color3.fromRGB(0, 255, 150)
+openEggBtn.TextSize = 14
+openEggBtn.Font = Enum.Font.GothamBold
+openEggBtn.ZIndex = 20
+openEggBtn.Parent = screenGui
+Instance.new("UICorner", openEggBtn).CornerRadius = UDim.new(0, 10)
+local eggStroke = Instance.new("UIStroke", openEggBtn)
+eggStroke.Color = Color3.fromRGB(0, 255, 150)
+eggStroke.Thickness = 2
+
+local panelFrame = Instance.new("Frame")
+panelFrame.Size = UDim2.new(0, 340, 0, 620)
+panelFrame.Position = UDim2.new(1, -400, 0.5, -310)
+panelFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+panelFrame.BorderSizePixel = 0
+panelFrame.Visible = false
+panelFrame.ZIndex = 25
+panelFrame.Parent = screenGui
+Instance.new("UICorner", panelFrame).CornerRadius = UDim.new(0, 12)
+local panelStroke = Instance.new("UIStroke", panelFrame)
+panelStroke.Color = Color3.fromRGB(0, 0, 0)
+panelStroke.Thickness = 2
+
+local panelTitle = Instance.new("TextLabel")
+panelTitle.Size = UDim2.new(1, 0, 0, 36)
+panelTitle.BackgroundTransparency = 1
+panelTitle.Text = "XEBO LTM Jump For Egg"
+panelTitle.TextColor3 = Color3.new(1, 1, 1)
+panelTitle.TextSize = 18
+panelTitle.Font = Enum.Font.GothamBold
+panelTitle.Parent = panelFrame
+
+local tabDivers = Instance.new("TextButton")
+tabDivers.Size = UDim2.new(0.45, 0, 0, 28)
+tabDivers.Position = UDim2.new(0.05, 0, 0, 40)
+tabDivers.BackgroundColor3 = Color3.fromRGB(0, 160, 100)
+tabDivers.Text = "Divers"
+tabDivers.TextColor3 = Color3.new(1, 1, 1)
+tabDivers.TextSize = 14
+tabDivers.Font = Enum.Font.GothamBold
+tabDivers.Parent = panelFrame
+Instance.new("UICorner", tabDivers).CornerRadius = UDim.new(0, 6)
+
+local tabKeybinds = Instance.new("TextButton")
+tabKeybinds.Size = UDim2.new(0.45, 0, 0, 28)
+tabKeybinds.Position = UDim2.new(0.5, 0, 0, 40)
+tabKeybinds.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+tabKeybinds.Text = "Keybinds"
+tabKeybinds.TextColor3 = Color3.new(1, 1, 1)
+tabKeybinds.TextSize = 14
+tabKeybinds.Font = Enum.Font.GothamBold
+tabKeybinds.Parent = panelFrame
+Instance.new("UICorner", tabKeybinds).CornerRadius = UDim.new(0, 6)
+
+local diversFrame = Instance.new("Frame")
+diversFrame.Size = UDim2.new(1, -20, 1, -130)
+diversFrame.Position = UDim2.new(0, 10, 0, 78)
+diversFrame.BackgroundTransparency = 1
+diversFrame.Parent = panelFrame
+
+local keybindsFrame = Instance.new("Frame")
+keybindsFrame.Size = UDim2.new(1, -20, 1, -130)
+keybindsFrame.Position = UDim2.new(0, 10, 0, 78)
+keybindsFrame.BackgroundTransparency = 1
+keybindsFrame.Visible = false
+keybindsFrame.Parent = panelFrame
+
+-- Egg Frame séparée
+local eggPanel = Instance.new("Frame")
+eggPanel.Size = UDim2.new(0, 360, 0, 520)
+eggPanel.Position = UDim2.new(0, 40, 0.5, -260)
+eggPanel.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+eggPanel.BorderSizePixel = 0
+eggPanel.Visible = false
+eggPanel.ZIndex = 30
+eggPanel.Parent = screenGui
+Instance.new("UICorner", eggPanel).CornerRadius = UDim.new(0, 12)
+local eggPanelStroke = Instance.new("UIStroke", eggPanel)
+eggPanelStroke.Color = Color3.fromRGB(0, 255, 150)
+eggPanelStroke.Thickness = 2
+
+local eggPanelTitle = Instance.new("TextLabel")
+eggPanelTitle.Size = UDim2.new(1, -50, 0, 36)
+eggPanelTitle.Position = UDim2.new(0, 10, 0, 0)
+eggPanelTitle.BackgroundTransparency = 1
+eggPanelTitle.Text = "🥚 Egg Frame"
+eggPanelTitle.TextColor3 = Color3.fromRGB(0, 255, 150)
+eggPanelTitle.TextSize = 18
+eggPanelTitle.Font = Enum.Font.GothamBold
+eggPanelTitle.TextXAlignment = Enum.TextXAlignment.Left
+eggPanelTitle.Parent = eggPanel
+
+local eggCloseBtn = Instance.new("TextButton")
+eggCloseBtn.Size = UDim2.new(0, 32, 0, 32)
+eggCloseBtn.Position = UDim2.new(1, -40, 0, 4)
+eggCloseBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+eggCloseBtn.Text = "X"
+eggCloseBtn.TextColor3 = Color3.new(1, 1, 1)
+eggCloseBtn.TextSize = 16
+eggCloseBtn.Font = Enum.Font.GothamBold
+eggCloseBtn.Parent = eggPanel
+Instance.new("UICorner", eggCloseBtn).CornerRadius = UDim.new(0, 6)
+
+local eggRefreshBtn = Instance.new("TextButton")
+eggRefreshBtn.Size = UDim2.new(1, -20, 0, 30)
+eggRefreshBtn.Position = UDim2.new(0, 10, 0, 42)
+eggRefreshBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 90)
+eggRefreshBtn.Text = "🔄 Refresh Eggs"
+eggRefreshBtn.TextColor3 = Color3.new(1, 1, 1)
+eggRefreshBtn.TextSize = 14
+eggRefreshBtn.Font = Enum.Font.GothamBold
+eggRefreshBtn.Parent = eggPanel
+Instance.new("UICorner", eggRefreshBtn).CornerRadius = UDim.new(0, 6)
+
+local eggScroll = Instance.new("ScrollingFrame")
+eggScroll.Size = UDim2.new(1, -20, 1, -90)
+eggScroll.Position = UDim2.new(0, 10, 0, 80)
+eggScroll.BackgroundTransparency = 1
+eggScroll.ScrollBarThickness = 6
+eggScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+eggScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+eggScroll.Parent = eggPanel
+
+local eggListLayout = Instance.new("UIListLayout")
+eggListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+eggListLayout.Padding = UDim.new(0, 8)
+eggListLayout.Parent = eggScroll
+
+local function createToggle(parent, name, yPos)
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0.65, 0, 0, 28)
+	label.Position = UDim2.new(0, 8, 0, yPos)
+	label.BackgroundTransparency = 1
+	label.Text = name
+	label.TextColor3 = Color3.fromRGB(200, 200, 200)
+	label.TextSize = 14
+	label.Font = Enum.Font.Gotham
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = parent
+
+	local toggle = Instance.new("TextButton")
+	toggle.Size = UDim2.new(0, 60, 0, 26)
+	toggle.Position = UDim2.new(1, -70, 0, yPos + 1)
+	toggle.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+	toggle.Text = "OFF"
+	toggle.TextColor3 = Color3.new(1, 1, 1)
+	toggle.TextSize = 13
+	toggle.Font = Enum.Font.GothamBold
+	toggle.Parent = parent
+	Instance.new("UICorner", toggle).CornerRadius = UDim.new(0, 6)
+	return toggle
+end
+
+local highlightToggle = createToggle(diversFrame, "ESP Eggs", 6)
+local beamToggle = createToggle(diversFrame, "Beam (trait)", 38)
+local nameTagsToggle = createToggle(diversFrame, "Noms Eggs (murs)", 70)
+local infiniteJumpToggle = createToggle(diversFrame, "Infinite Jump", 102)
+local godModeToggle = createToggle(diversFrame, "Anti-Death (God)", 134)
+local antiRagdollToggle = createToggle(diversFrame, "Anti Ragdoll", 166)
+local noPlayerAnimsToggle = createToggle(diversFrame, "No Player Anims", 198)
+local autoFarmToggle = createToggle(diversFrame, "Auto Farm XP", 230)
+local fpsBoostToggle = createToggle(diversFrame, "Boost FPS", 262)
+local instaPromptToggle = createToggle(diversFrame, "Insta Prompt", 294)
+
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Size = UDim2.new(0.4, 0, 0, 28)
+speedLabel.Position = UDim2.new(0, 8, 0, 340)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Text = "Speed :"
+speedLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+speedLabel.TextSize = 14
+speedLabel.Font = Enum.Font.Gotham
+speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedLabel.Parent = diversFrame
+
+local speedBox = Instance.new("TextBox")
+speedBox.Size = UDim2.new(0, 55, 0, 26)
+speedBox.Position = UDim2.new(0, 70, 0, 341)
+speedBox.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+speedBox.Text = "100"
+speedBox.TextColor3 = Color3.new(1, 1, 1)
+speedBox.TextSize = 14
+speedBox.Font = Enum.Font.GothamBold
+speedBox.ClearTextOnFocus = false
+speedBox.Parent = diversFrame
+Instance.new("UICorner", speedBox).CornerRadius = UDim.new(0, 6)
+
+local speedLockToggle = Instance.new("TextButton")
+speedLockToggle.Size = UDim2.new(0, 60, 0, 26)
+speedLockToggle.Position = UDim2.new(1, -70, 0, 341)
+speedLockToggle.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+speedLockToggle.Text = "OFF"
+speedLockToggle.TextColor3 = Color3.new(1, 1, 1)
+speedLockToggle.TextSize = 13
+speedLockToggle.Font = Enum.Font.GothamBold
+speedLockToggle.Parent = diversFrame
+Instance.new("UICorner", speedLockToggle).CornerRadius = UDim.new(0, 6)
+
+local fovLabel = Instance.new("TextLabel")
+fovLabel.Size = UDim2.new(0.4, 0, 0, 28)
+fovLabel.Position = UDim2.new(0, 8, 0, 380)
+fovLabel.BackgroundTransparency = 1
+fovLabel.Text = "FOV :"
+fovLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+fovLabel.TextSize = 14
+fovLabel.Font = Enum.Font.Gotham
+fovLabel.TextXAlignment = Enum.TextXAlignment.Left
+fovLabel.Parent = diversFrame
+
+local fovBox = Instance.new("TextBox")
+fovBox.Size = UDim2.new(0, 55, 0, 26)
+fovBox.Position = UDim2.new(0, 70, 0, 381)
+fovBox.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+fovBox.Text = "120"
+fovBox.TextColor3 = Color3.new(1, 1, 1)
+fovBox.TextSize = 14
+fovBox.Font = Enum.Font.GothamBold
+fovBox.ClearTextOnFocus = false
+fovBox.Parent = diversFrame
+Instance.new("UICorner", fovBox).CornerRadius = UDim.new(0, 6)
+
+local fovApplyBtn = Instance.new("TextButton")
+fovApplyBtn.Size = UDim2.new(0, 60, 0, 26)
+fovApplyBtn.Position = UDim2.new(1, -70, 0, 381)
+fovApplyBtn.BackgroundColor3 = Color3.fromRGB(0, 160, 100)
+fovApplyBtn.Text = "Apply"
+fovApplyBtn.TextColor3 = Color3.new(1, 1, 1)
+fovApplyBtn.TextSize = 13
+fovApplyBtn.Font = Enum.Font.GothamBold
+fovApplyBtn.Parent = diversFrame
+Instance.new("UICorner", fovApplyBtn).CornerRadius = UDim.new(0, 6)
+
+local rejoinBtn = Instance.new("TextButton")
+rejoinBtn.Size = UDim2.new(0.9, 0, 0, 32)
+rejoinBtn.Position = UDim2.new(0.05, 0, 0, 425)
+rejoinBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+rejoinBtn.Text = "🔄 Rejoin Serv"
+rejoinBtn.TextColor3 = Color3.new(1, 1, 1)
+rejoinBtn.TextSize = 15
+rejoinBtn.Font = Enum.Font.GothamBold
+rejoinBtn.Parent = diversFrame
+Instance.new("UICorner", rejoinBtn).CornerRadius = UDim.new(0, 8)
+
+local themes = {
+	{Name = "Sombre", Bg = Color3.fromRGB(18, 18, 22), Accent = Color3.fromRGB(0, 0, 0), Text = Color3.new(1,1,1)},
+	{Name = "Vert", Bg = Color3.fromRGB(15, 30, 20), Accent = Color3.fromRGB(50, 255, 100), Text = Color3.new(1,1,1)},
+	{Name = "Bleu", Bg = Color3.fromRGB(15, 25, 45), Accent = Color3.fromRGB(0, 170, 255), Text = Color3.new(1,1,1)},
+	{Name = "Rouge", Bg = Color3.fromRGB(35, 15, 15), Accent = Color3.fromRGB(255, 60, 60), Text = Color3.new(1,1,1)},
+}
+local currentTheme = themes[1]
+
+local themeLabel = Instance.new("TextLabel")
+themeLabel.Size = UDim2.new(1, 0, 0, 24)
+themeLabel.Position = UDim2.new(0, 8, 0, 470)
+themeLabel.BackgroundTransparency = 1
+themeLabel.Text = "Thème :"
+themeLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+themeLabel.TextSize = 13
+themeLabel.Font = Enum.Font.Gotham
+themeLabel.TextXAlignment = Enum.TextXAlignment.Left
+themeLabel.Parent = diversFrame
+
+local themeButtons = {}
+for i, th in ipairs(themes) do
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0, 70, 0, 26)
+	btn.Position = UDim2.new(0, 8 + (i-1)*78, 0, 497)
+	btn.BackgroundColor3 = th.Bg
+	btn.Text = th.Name
+	btn.TextColor3 = th.Text
+	btn.TextSize = 12
+	btn.Font = Enum.Font.GothamBold
+	btn.Parent = diversFrame
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+	themeButtons[i] = btn
+end
+
+local function createKeybindRow(parent, displayName, keyName, yPos)
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0.55, 0, 0, 32)
+	label.Position = UDim2.new(0, 8, 0, yPos)
+	label.BackgroundTransparency = 1
+	label.Text = displayName
+	label.TextColor3 = Color3.fromRGB(200, 200, 200)
+	label.TextSize = 14
+	label.Font = Enum.Font.Gotham
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = parent
+
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0, 90, 0, 30)
+	btn.Position = UDim2.new(1, -100, 0, yPos + 1)
+	btn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+	btn.Text = Keybinds[keyName].Name
+	btn.TextColor3 = Color3.new(1, 1, 1)
+	btn.TextSize = 14
+	btn.Font = Enum.Font.GothamBold
+	btn.Parent = parent
+	Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+
+	btn.MouseButton1Click:Connect(function()
+		if waitingForRebind then return end
+		waitingForRebind = keyName
+		btn.Text = "..."
+		btn.BackgroundColor3 = Color3.fromRGB(0, 160, 100)
+	end)
+	return btn
+end
+
+local gigaJumpBtn = createKeybindRow(keybindsFrame, "Giga Jump", "GigaJump", 10)
+local autoFarmKeyBtn = createKeybindRow(keybindsFrame, "Auto Farm XP", "AutoFarm", 50)
+local tpGroundBtn = createKeybindRow(keybindsFrame, "TP Ground", "TPGround", 90)
+
+local keybindInfo = Instance.new("TextLabel")
+keybindInfo.Size = UDim2.new(1, -16, 0, 160)
+keybindInfo.Position = UDim2.new(0, 8, 0, 140)
+keybindInfo.BackgroundTransparency = 1
+keybindInfo.Text = "Espace = Infinite Jump\nG = Giga Jump (STOP NET)\nF = Auto Farm XP\nE = TP Ground\n\nGiga: 1000s / Speed 1000\nSnipe Speed: 5000\nFarm Jump: 0.3s"
+keybindInfo.TextColor3 = Color3.fromRGB(160, 160, 180)
+keybindInfo.TextSize = 13
+keybindInfo.Font = Enum.Font.Gotham
+keybindInfo.TextWrapped = true
+keybindInfo.TextXAlignment = Enum.TextXAlignment.Left
+keybindInfo.Parent = keybindsFrame
+
+local closePanel = Instance.new("TextButton")
+closePanel.Size = UDim2.new(0.9, 0, 0, 34)
+closePanel.Position = UDim2.new(0.05, 0, 1, -48)
+closePanel.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+closePanel.Text = "Fermer"
+closePanel.TextColor3 = Color3.new(1, 1, 1)
+closePanel.TextSize = 15
+closePanel.Font = Enum.Font.GothamBold
+closePanel.Parent = panelFrame
+Instance.new("UICorner", closePanel).CornerRadius = UDim.new(0, 8)
+
+local function makeDraggable(title, frame)
+	local dragging, dragStart, startPos = false, nil, nil
+	title.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = frame.Position
+		end
+	end)
+	title.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = false
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = input.Position - dragStart
+			frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+		end
+	end)
+end
+makeDraggable(panelTitle, panelFrame)
+makeDraggable(eggPanelTitle, eggPanel)
+
+-- ====================== HELPERS ======================
+local function setToggleVisual(toggle, state)
+	toggle.Text = state and "ON" or "OFF"
+	toggle.BackgroundColor3 = state and Color3.fromRGB(0,180,80) or Color3.fromRGB(50,50,60)
+end
+
+local function applyTheme(theme)
+	currentTheme = theme
+	panelFrame.BackgroundColor3 = theme.Bg
+	panelStroke.Color = theme.Accent
+	panelTitle.TextColor3 = theme.Text
+	openPanelBtn.BackgroundColor3 = theme.Bg
+	openStroke.Color = (theme.Accent == Color3.fromRGB(0,0,0)) and Color3.fromRGB(0,200,120) or theme.Accent
+	fpsLabel.BackgroundColor3 = theme.Bg
+	fpsLabel.TextColor3 = (theme.Accent == Color3.fromRGB(0,0,0)) and Color3.fromRGB(0,255,150) or theme.Accent
+	eggPanel.BackgroundColor3 = theme.Bg
+end
+
+local function getHum()
+	local c = player.Character
+	return c and c:FindFirstChildOfClass("Humanoid")
+end
+
+local function getRoot()
+	local c = player.Character
+	return c and (c:FindFirstChild("HumanoidRootPart") or c.PrimaryPart)
+end
+
+local function getJumpLaunchY(hum)
+	if not hum then return 50 end
+	if hum.UseJumpPower ~= false and tonumber(hum.JumpPower) and hum.JumpPower > 0 then
+		return hum.JumpPower
+	end
+	local jh = tonumber(hum.JumpHeight)
+	if jh and jh > 0 then
+		return math.sqrt(2 * workspace.Gravity * jh)
+	end
+	return 50
+end
+
+local function launchHumanoid(hum, forceOverride)
+	local root = getRoot()
+	if not hum or not root then return end
+	pcall(function()
+		hum.Sit = false
+		hum.PlatformStand = false
+	end)
+	local launchY = forceOverride or getJumpLaunchY(hum)
+	local vel = root.AssemblyLinearVelocity
+	root.AssemblyLinearVelocity = Vector3.new(vel.X, math.max(vel.Y, launchY), vel.Z)
+end
+
+local function instantStop()
+	local root = getRoot()
+	if root then
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+	end
+end
+
+local function tpToGround()
+	local root = getRoot()
+	local hum = getHum()
+	if not root or not hum then return end
+	local origin = root.Position
+	local rayParams = RaycastParams.new()
+	rayParams.FilterDescendantsInstances = {character}
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.IgnoreWater = true
+	local result = workspace:Raycast(origin, Vector3.new(0, -10000, 0), rayParams)
+	if result then
+		root.CFrame = CFrame.new(result.Position + Vector3.new(0, 3, 0))
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+	else
+		root.CFrame = CFrame.new(origin.X, origin.Y - 50, origin.Z)
+		root.AssemblyLinearVelocity = Vector3.zero
+	end
+end
+
+local function rejoinServer()
+	local success = pcall(function()
+		TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+	end)
+	if not success then
+		pcall(function()
+			TeleportService:Teleport(game.PlaceId, player)
+		end)
+	end
+end
+
+function setSpeedLock(value)
+	currentSpeedLock = value
+	if SpeedConnection then
+		SpeedConnection:Disconnect()
+		SpeedConnection = nil
+	end
+	if value then
+		SpeedConnection = RunService.Heartbeat:Connect(function()
+			local hum = getHum()
+			if hum and hum.Health > 0 then
+				hum.WalkSpeed = value
+			end
+		end)
+		setToggleVisual(speedLockToggle, true)
+		speedBox.Text = tostring(value)
+	else
+		local hum = getHum()
+		if hum then hum.WalkSpeed = 16 end
+		setToggleVisual(speedLockToggle, false)
+		speedBox.Text = "16"
+	end
+end
+
+function setInfiniteJump(state)
+	infiniteJumpEnabled = state
+	setToggleVisual(infiniteJumpToggle, state)
+end
+
+local function applyFOV(value)
+	value = math.clamp(tonumber(value) or 70, 70, 120)
+	customFOV = value
+	fovBox.Text = tostring(value)
+	local cam = workspace.CurrentCamera
+	if cam then cam.FieldOfView = value end
+end
+
+local function applyGodMode()
+	local hum = getHum()
+	if not hum then return end
+	pcall(function()
+		hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+		hum.BreakJointsOnDeath = false
+	end)
+	if hum.Health < hum.MaxHealth then
+		hum.Health = hum.MaxHealth
+	end
+end
+
+local function setGodMode(state)
+	godModeEnabled = state
+	setToggleVisual(godModeToggle, state)
+	if state then applyGodMode() end
+end
+
+local function applyAntiRagdoll()
+	local hum = getHum()
+	if not hum then return end
+	pcall(function()
+		hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+		hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+		hum:SetStateEnabled(Enum.HumanoidStateType.Flying, false)
+		hum:SetStateEnabled(Enum.HumanoidStateType.Physics, false)
+		local state = hum:GetState()
+		if state == Enum.HumanoidStateType.Ragdoll or state == Enum.HumanoidStateType.FallingDown or state == Enum.HumanoidStateType.Physics then
+			hum:ChangeState(Enum.HumanoidStateType.Running)
+		end
+		if hum.PlatformStand then hum.PlatformStand = false end
+		if hum.Sit then hum.Sit = false end
+	end)
+end
+
+local function setAntiRagdoll(state)
+	antiRagdollEnabled = state
+	setToggleVisual(antiRagdollToggle, state)
+	if state then applyAntiRagdoll() end
+end
+
+local function disablePlayerAnimations()
+	local char = player.Character
+	if not char then return end
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	if not hum then return end
+	local animator = hum:FindFirstChildOfClass("Animator")
+	if not animator then return end
+	for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+		pcall(function() track:Stop(0) end)
+	end
+end
+
+function setNoPlayerAnims(state)
+	noPlayerAnimsEnabled = state
+	setToggleVisual(noPlayerAnimsToggle, state)
+	if NoPlayerAnimsConnection then
+		NoPlayerAnimsConnection:Disconnect()
+		NoPlayerAnimsConnection = nil
+	end
+	if state then
+		NoPlayerAnimsConnection = RunService.Heartbeat:Connect(function()
+			if not noPlayerAnimsEnabled then return end
+			disablePlayerAnimations()
+		end)
+		disablePlayerAnimations()
+	end
+end
+
+local function applyInstaPrompt()
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("ProximityPrompt") then
+			pcall(function() obj.HoldDuration = 0 end)
+		end
+	end
+end
+
+local function setInstaPrompt(state)
+	instaPromptEnabled = state
+	setToggleVisual(instaPromptToggle, state)
+	if state then applyInstaPrompt() end
+end
+
+workspace.DescendantAdded:Connect(function(obj)
+	if instaPromptEnabled and obj:IsA("ProximityPrompt") then
+		pcall(function() obj.HoldDuration = 0 end)
+	end
+end)
+
+local function toggleFPSBoost(enable)
+	fpsBoostEnabled = enable
+	setToggleVisual(fpsBoostToggle, enable)
+	if enable then
+		savedData = {}
+		task.spawn(function()
+			local BATCH = 250
+			local n = 0
+			local function yieldBatch()
+				n = n + 1
+				if n % BATCH == 0 then task.wait() end
+			end
+			local roots = {}
+			local ms = game:FindFirstChild("MaterialService")
+			if ms then table.insert(roots, ms) end
+			for _, svcName in ipairs({"Workspace", "ReplicatedStorage", "Lighting"}) do
+				local svc = game:FindFirstChild(svcName)
+				if svc then table.insert(roots, svc) end
+			end
+			for _, root in ipairs(roots) do
+				local ok, desc = pcall(function() return root:GetDescendants() end)
+				if ok and desc then
+					for _, obj in ipairs(desc) do
+						if obj:IsA("MaterialVariant") or obj.ClassName == "MaterialVariant" then
+							table.insert(savedData, {Object = obj, Kind = "MaterialVariant", Parent = obj.Parent})
+							pcall(function() obj.Parent = nil end)
+							yieldBatch()
+						elseif obj:IsA("BasePart") then
+							table.insert(savedData, {
+								Object = obj, Kind = "Part",
+								Material = obj.Material, CastShadow = obj.CastShadow, Reflectance = obj.Reflectance,
+							})
+							obj.Material = Enum.Material.SmoothPlastic
+							obj.CastShadow = false
+							obj.Reflectance = 0
+							yieldBatch()
+						elseif obj:IsA("Texture") or obj:IsA("Decal") then
+							table.insert(savedData, {Object = obj, Kind = "Texture", Texture = obj.Texture})
+							obj.Texture = ""
+							yieldBatch()
+						elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
+							if obj.Name ~= "XeboBeam" then
+								table.insert(savedData, {Object = obj, Kind = "Effect", Enabled = obj.Enabled})
+								obj.Enabled = false
+								yieldBatch()
+							end
+						end
+					end
+				end
+			end
+		end)
+	else
+		task.spawn(function()
+			local BATCH = 300
+			for i, data in ipairs(savedData) do
+				local obj = data.Object
+				if obj then
+					if data.Kind == "MaterialVariant" then
+						if data.Parent and data.Parent.Parent then
+							pcall(function() obj.Parent = data.Parent end)
+						end
+					elseif obj.Parent then
+						if data.Kind == "Part" then
+							obj.Material = data.Material
+							obj.CastShadow = data.CastShadow
+							obj.Reflectance = data.Reflectance or 0
+						elseif data.Kind == "Texture" then
+							obj.Texture = data.Texture
+						elseif data.Kind == "Effect" then
+							obj.Enabled = data.Enabled
+						end
+					end
+				end
+				if i % BATCH == 0 then task.wait() end
+			end
+			savedData = {}
+		end)
+	end
+end
+
+local function clearVisuals()
+	for _, h in ipairs(currentHighlights) do if h and h.Parent then h:Destroy() end end
+	currentHighlights = {}
+	if currentBeam and currentBeam.Parent then currentBeam:Destroy() end
+	currentBeam = nil
+	for _, a in ipairs(currentAttachments) do if a and a.Parent then a:Destroy() end end
+	currentAttachments = {}
+	for _, tag in ipairs(currentNameTags) do if tag and tag.Parent then tag:Destroy() end end
+	currentNameTags = {}
+end
+
+local function findAllEggs()
+	local results = {}
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("Model") and string.match(obj.Name, "Egg$") then
+			table.insert(results, obj)
+		end
+	end
+	return results
+end
+
+local function updateVisuals(models)
+	clearVisuals()
+	if not models or #models == 0 then return end
+	local col = (currentTheme.Accent == Color3.fromRGB(0,0,0)) and Color3.fromRGB(0, 255, 150) or currentTheme.Accent
+
+	if highlightEnabled then
+		for _, model in ipairs(models) do
+			if model and model.Parent then
+				local h = Instance.new("Highlight")
+				h.Adornee = model
+				h.FillColor = col
+				h.OutlineColor = col
+				h.FillTransparency = 0.6
+				h.OutlineTransparency = 0
+				h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+				h.Parent = model
+				table.insert(currentHighlights, h)
+			end
+		end
+	end
+
+	if nameTagsEnabled then
+		for _, model in ipairs(models) do
+			if model and model.Parent then
+				local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+				if part then
+					local billboard = Instance.new("BillboardGui")
+					billboard.Adornee = part
+					billboard.Size = UDim2.new(0, 160, 0, 30)
+					billboard.StudsOffset = Vector3.new(0, 3.5, 0)
+					billboard.AlwaysOnTop = true
+					billboard.MaxDistance = 500
+					billboard.Parent = part
+					local label = Instance.new("TextLabel")
+					label.Size = UDim2.new(1, 0, 1, 0)
+					label.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+					label.BackgroundTransparency = 0.4
+					label.Text = model.Name
+					label.TextColor3 = col
+					label.TextSize = 14
+					label.Font = Enum.Font.GothamBold
+					label.TextStrokeTransparency = 0.3
+					label.Parent = billboard
+					Instance.new("UICorner", label).CornerRadius = UDim.new(0, 6)
+					table.insert(currentNameTags, billboard)
+				end
+			end
+		end
+	end
+
+	if beamEnabled and humanoidRootPart then
+		local targetPart = nil
+		for _, m in ipairs(models) do
+			if m and m.Parent then
+				targetPart = m.PrimaryPart or m:FindFirstChildWhichIsA("BasePart")
+				if targetPart then break end
+			end
+		end
+		if targetPart then
+			local a0 = Instance.new("Attachment", humanoidRootPart)
+			local a1 = Instance.new("Attachment", targetPart)
+			table.insert(currentAttachments, a0)
+			table.insert(currentAttachments, a1)
+			local beam = Instance.new("Beam")
+			beam.Name = "XeboBeam"
+			beam.Attachment0 = a0
+			beam.Attachment1 = a1
+			beam.Color = ColorSequence.new(col)
+			beam.Width0 = 0.3
+			beam.Width1 = 0.3
+			beam.FaceCamera = true
+			beam.LightEmission = 0.7
+			beam.Transparency = NumberSequence.new(0.2)
+			beam.Parent = humanoidRootPart
+			currentBeam = beam
+		end
+	end
+end
+
+local function updateAll()
+	local eggs = findAllEggs()
+	lastEggModels = eggs
+	updateVisuals(eggs)
+end
+
+-- ====================== GIGA JUMP (speed 1000, durée 1000) ======================
+local function doGigaJump()
+	if gigaJumpActive then
+		gigaJumpActive = false
+		instantStop()
+		return
+	end
+
+	gigaJumpActive = true
+	local endTime = tick() + GIGA_DURATION
+	task.spawn(function()
+		while tick() < endTime and gigaJumpActive do
+			local hum = getHum()
+			if hum and hum.Health > 0 then
+				launchHumanoid(hum, GIGA_SPEED)
+			end
+			task.wait(0.02)
+		end
+		gigaJumpActive = false
+		instantStop()
+	end)
+end
+
+-- ====================== SNIPE (speed 5000) ======================
+local function doSnipe(eggModel)
+	if snipeActive then
+		snipeActive = false
+		instantStop()
+		return
+	end
+	if not eggModel or not eggModel.Parent then return end
+
+	local eggPart = eggModel.PrimaryPart or eggModel:FindFirstChildWhichIsA("BasePart")
+	if not eggPart then return end
+
+	snipeActive = true
+	local bigForce = SNIPE_SPEED
+	local smallForce = 28
+
+	task.spawn(function()
+		while snipeActive do
+			local root = getRoot()
+			local hum = getHum()
+			if not root or not hum or hum.Health <= 0 then break end
+			if not eggModel.Parent then break end
+
+			eggPart = eggModel.PrimaryPart or eggModel:FindFirstChildWhichIsA("BasePart")
+			if not eggPart then break end
+
+			if root.Position.Y >= eggPart.Position.Y - 1 then
+				instantStop()
+				break
+			end
+
+			launchHumanoid(hum, bigForce)
+			task.wait(0.02)
+		end
+
+		if not snipeActive then
+			instantStop()
+			return
+		end
+
+		task.wait(0.08)
+		instantStop()
+
+		local startTime = tick()
+		while snipeActive and (tick() - startTime) < 20 do
+			local root = getRoot()
+			local hum = getHum()
+			if not root or not hum or hum.Health <= 0 then break end
+			if not eggModel.Parent then break end
+
+			eggPart = eggModel.PrimaryPart or eggModel:FindFirstChildWhichIsA("BasePart")
+			if not eggPart then break end
+
+			local myPos = root.Position
+			local eggPos = eggPart.Position
+			local dx = eggPos.X - myPos.X
+			local dz = eggPos.Z - myPos.Z
+			local distXZ = math.sqrt(dx * dx + dz * dz)
+
+			if distXZ < 5 then break end
+
+			local vel = root.AssemblyLinearVelocity
+			local yVel = vel.Y
+			if myPos.Y > eggPos.Y + 8 then
+				yVel = math.min(yVel, 5)
+			elseif myPos.Y < eggPos.Y - 2 then
+				yVel = math.max(yVel, smallForce)
+			else
+				yVel = math.max(yVel, 12)
+			end
+
+			local dir = Vector3.new(dx, 0, dz).Unit
+			root.AssemblyLinearVelocity = Vector3.new(dir.X * 85, yVel, dir.Z * 85)
+			task.wait(0.04)
+		end
+
+		if not snipeActive then
+			instantStop()
+			return
+		end
+
+		local root = getRoot()
+		if root and eggModel.Parent then
+			eggPart = eggModel.PrimaryPart or eggModel:FindFirstChildWhichIsA("BasePart")
+			if eggPart then
+				local myPos = root.Position
+				local eggPos = eggPart.Position
+				local distXZ = (Vector3.new(myPos.X, 0, myPos.Z) - Vector3.new(eggPos.X, 0, eggPos.Z)).Magnitude
+				local aboveEgg = (myPos.Y >= eggPos.Y - 3) and (distXZ < 10)
+
+				instantStop()
+				task.wait(0.05)
+				if aboveEgg then
+					tpToGround()
+				end
+			else
+				instantStop()
+			end
+		else
+			instantStop()
+		end
+
+		snipeActive = false
+	end)
+end
+
+-- ====================== EGG FRAME LIST ======================
+local function clearEggList()
+	for _, child in ipairs(eggScroll:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+end
+
+local function buildEggList()
+	clearEggList()
+	local eggs = findAllEggs()
+	lastEggModels = eggs
+
+	local nameCount = {}
+	local nameIndex = {}
+	for _, model in ipairs(eggs) do
+		nameCount[model.Name] = (nameCount[model.Name] or 0) + 1
+	end
+
+	for i, model in ipairs(eggs) do
+		if not model or not model.Parent then continue end
+
+		local baseName = model.Name
+		nameIndex[baseName] = (nameIndex[baseName] or 0) + 1
+		local displayName = baseName
+		if nameCount[baseName] > 1 then
+			displayName = baseName .. " " .. nameIndex[baseName]
+		end
+
+		local card = Instance.new("Frame")
+		card.Size = UDim2.new(1, -4, 0, 110)
+		card.BackgroundColor3 = Color3.fromRGB(28, 28, 35)
+		card.LayoutOrder = i
+		card.Parent = eggScroll
+		Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
+
+		local vf = Instance.new("ViewportFrame")
+		vf.Size = UDim2.new(0, 90, 0, 90)
+		vf.Position = UDim2.new(0, 8, 0, 10)
+		vf.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+		vf.BorderSizePixel = 0
+		vf.Parent = card
+		Instance.new("UICorner", vf).CornerRadius = UDim.new(0, 6)
+
+		local cam = Instance.new("Camera")
+		cam.Parent = vf
+		vf.CurrentCamera = cam
+		local worldModel = Instance.new("WorldModel")
+		worldModel.Parent = vf
+
+		local ok, clone = pcall(function() return model:Clone() end)
+		if ok and clone then
+			clone.Parent = worldModel
+			local part = clone.PrimaryPart or clone:FindFirstChildWhichIsA("BasePart")
+			if part then
+				cam.CFrame = CFrame.new(part.Position + Vector3.new(4, 3, 6), part.Position)
+			end
+		end
+
+		local nameLbl = Instance.new("TextLabel")
+		nameLbl.Size = UDim2.new(0, 150, 0, 30)
+		nameLbl.Position = UDim2.new(0, 110, 0, 12)
+		nameLbl.BackgroundTransparency = 1
+		nameLbl.Text = displayName
+		nameLbl.TextColor3 = Color3.fromRGB(0, 255, 150)
+		nameLbl.TextSize = 14
+		nameLbl.Font = Enum.Font.GothamBold
+		nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+		nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+		nameLbl.Parent = card
+
+		local snipeBtn = Instance.new("TextButton")
+		snipeBtn.Size = UDim2.new(0, 100, 0, 32)
+		snipeBtn.Position = UDim2.new(0, 110, 0, 55)
+		snipeBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 220)
+		snipeBtn.Text = "🎯 Snipe"
+		snipeBtn.TextColor3 = Color3.new(1, 1, 1)
+		snipeBtn.TextSize = 14
+		snipeBtn.Font = Enum.Font.GothamBold
+		snipeBtn.Parent = card
+		Instance.new("UICorner", snipeBtn).CornerRadius = UDim.new(0, 6)
+
+		snipeBtn.MouseButton1Click:Connect(function()
+			if snipeActive then
+				snipeActive = false
+				instantStop()
+				snipeBtn.Text = "🎯 Snipe"
+				snipeBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 220)
+			else
+				snipeBtn.Text = "⏹ STOP"
+				snipeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+				doSnipe(model)
+				task.spawn(function()
+					while snipeActive do task.wait(0.15) end
+					if snipeBtn and snipeBtn.Parent then
+						snipeBtn.Text = "🎯 Snipe"
+						snipeBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 220)
+					end
+				end)
+			end
+		end)
+	end
+end
+
+eggRefreshBtn.MouseButton1Click:Connect(function()
+	buildEggList()
+end)
+
+-- ====================== AUTO FARM (0.3s fixe) ======================
+local function startAutoFarmXP()
+	if autoFarmLoop then return end
+	autoFarmXPEnabled = true
+	setToggleVisual(autoFarmToggle, true)
+	autoFarmLoop = task.spawn(function()
+		while autoFarmXPEnabled do
+			local endTime = tick() + FARM_JUMP_TIME
+			while tick() < endTime and autoFarmXPEnabled do
+				local hum = getHum()
+				if hum and hum.Health > 0 then launchHumanoid(hum) end
+				task.wait(0.12)
+			end
+			if not autoFarmXPEnabled then break end
+			tpToGround()
+			task.wait(0.35)
+		end
+		autoFarmLoop = nil
+	end)
+end
+
+local function stopAutoFarmXP()
+	autoFarmXPEnabled = false
+	setToggleVisual(autoFarmToggle, false)
+	if autoFarmLoop then
+		task.cancel(autoFarmLoop)
+		autoFarmLoop = nil
+	end
+end
+
+local function toggleAutoFarmXP()
+	if autoFarmXPEnabled then stopAutoFarmXP() else startAutoFarmXP() end
+end
+
+-- ====================== INPUTS ======================
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if waitingForRebind then
+		if input.UserInputType == Enum.UserInputType.Keyboard then
+			Keybinds[waitingForRebind] = input.KeyCode
+			if waitingForRebind == "GigaJump" then
+				gigaJumpBtn.Text = input.KeyCode.Name
+				gigaJumpBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+			elseif waitingForRebind == "AutoFarm" then
+				autoFarmKeyBtn.Text = input.KeyCode.Name
+				autoFarmKeyBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+			elseif waitingForRebind == "TPGround" then
+				tpGroundBtn.Text = input.KeyCode.Name
+				tpGroundBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+			end
+			waitingForRebind = nil
+		end
+		return
+	end
+	if input.KeyCode == Enum.KeyCode.Space then
+		spaceHeld = true
+	elseif input.KeyCode == Keybinds.GigaJump then
+		doGigaJump()
+	elseif input.KeyCode == Keybinds.AutoFarm then
+		toggleAutoFarmXP()
+	elseif input.KeyCode == Keybinds.TPGround then
+		tpToGround()
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.KeyCode == Enum.KeyCode.Space then spaceHeld = false end
+end)
+
+RunService.Heartbeat:Connect(function()
+	if infiniteJumpEnabled and spaceHeld then
+		local hum = getHum()
+		if hum and hum.Health > 0 then launchHumanoid(hum) end
+	end
+	if godModeEnabled then
+		local hum = getHum()
+		if hum then
+			pcall(function()
+				hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+				hum.BreakJointsOnDeath = false
+				if hum.Health < hum.MaxHealth then hum.Health = hum.MaxHealth end
+			end)
+		end
+	end
+	if antiRagdollEnabled then applyAntiRagdoll() end
+end)
+
+local frames, lastFpsTime = 0, tick()
+RunService.RenderStepped:Connect(function()
+	frames += 1
+	if tick() - lastFpsTime >= 1 then
+		fpsLabel.Text = "FPS: " .. frames
+		frames = 0
+		lastFpsTime = tick()
+	end
+end)
+
+-- ====================== CONNECTIONS ======================
+openPanelBtn.MouseButton1Click:Connect(function()
+	panelFrame.Visible = not panelFrame.Visible
+end)
+
+openEggBtn.MouseButton1Click:Connect(function()
+	eggPanel.Visible = not eggPanel.Visible
+	if eggPanel.Visible then buildEggList() end
+end)
+
+eggCloseBtn.MouseButton1Click:Connect(function()
+	eggPanel.Visible = false
+end)
+
+closePanel.MouseButton1Click:Connect(function()
+	panelFrame.Visible = false
+end)
+
+tabDivers.MouseButton1Click:Connect(function()
+	diversFrame.Visible = true
+	keybindsFrame.Visible = false
+	tabDivers.BackgroundColor3 = Color3.fromRGB(0, 160, 100)
+	tabKeybinds.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+end)
+
+tabKeybinds.MouseButton1Click:Connect(function()
+	diversFrame.Visible = false
+	keybindsFrame.Visible = true
+	tabKeybinds.BackgroundColor3 = Color3.fromRGB(0, 160, 100)
+	tabDivers.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+end)
+
+for i, btn in ipairs(themeButtons) do
+	btn.MouseButton1Click:Connect(function()
+		applyTheme(themes[i])
+		updateVisuals(lastEggModels)
+	end)
+end
+
+highlightToggle.MouseButton1Click:Connect(function()
+	highlightEnabled = not highlightEnabled
+	setToggleVisual(highlightToggle, highlightEnabled)
+	updateVisuals(lastEggModels)
+end)
+beamToggle.MouseButton1Click:Connect(function()
+	beamEnabled = not beamEnabled
+	setToggleVisual(beamToggle, beamEnabled)
+	updateVisuals(lastEggModels)
+end)
+nameTagsToggle.MouseButton1Click:Connect(function()
+	nameTagsEnabled = not nameTagsEnabled
+	setToggleVisual(nameTagsToggle, nameTagsEnabled)
+	updateVisuals(lastEggModels)
+end)
+infiniteJumpToggle.MouseButton1Click:Connect(function() setInfiniteJump(not infiniteJumpEnabled) end)
+godModeToggle.MouseButton1Click:Connect(function() setGodMode(not godModeEnabled) end)
+antiRagdollToggle.MouseButton1Click:Connect(function() setAntiRagdoll(not antiRagdollEnabled) end)
+noPlayerAnimsToggle.MouseButton1Click:Connect(function() setNoPlayerAnims(not noPlayerAnimsEnabled) end)
+autoFarmToggle.MouseButton1Click:Connect(function() toggleAutoFarmXP() end)
+fpsBoostToggle.MouseButton1Click:Connect(function() toggleFPSBoost(not fpsBoostEnabled) end)
+instaPromptToggle.MouseButton1Click:Connect(function() setInstaPrompt(not instaPromptEnabled) end)
+
+speedLockToggle.MouseButton1Click:Connect(function()
+	if currentSpeedLock then
+		setSpeedLock(nil)
+	else
+		local v = tonumber(speedBox.Text)
+		setSpeedLock((v and v > 0) and v or 100)
+		if not v or v <= 0 then speedBox.Text = "100" end
+	end
+end)
+
+fovApplyBtn.MouseButton1Click:Connect(function() applyFOV(fovBox.Text) end)
+fovBox.FocusLost:Connect(function(enter) if enter then applyFOV(fovBox.Text) end end)
+rejoinBtn.MouseButton1Click:Connect(function() rejoinServer() end)
+
+-- ====================== AUTO START ======================
+applyTheme(themes[1])
+setToggleVisual(highlightToggle, true)
+setToggleVisual(beamToggle, true)
+setToggleVisual(nameTagsToggle, true)
+setToggleVisual(infiniteJumpToggle, true)
+setToggleVisual(godModeToggle, true)
+setToggleVisual(antiRagdollToggle, true)
+setToggleVisual(noPlayerAnimsToggle, true)
+setToggleVisual(autoFarmToggle, false)
+setToggleVisual(fpsBoostToggle, true)
+setToggleVisual(instaPromptToggle, true)
+
+applyFOV(120)
+setSpeedLock(100)
+setNoPlayerAnims(true)
+setInstaPrompt(true)
+
+task.defer(function()
+	task.wait(0.4)
+	applyGodMode()
+	applyAntiRagdoll()
+	toggleFPSBoost(true)
+	applyInstaPrompt()
+	pcall(updateAll)
+end)
+
+print("[XEBO LTM] Giga 1000s/1000 | Snipe 5000 | Farm 0.3 | NoAnims ON | InstaPrompt ON")
+
+task.spawn(function()
+	local lastRefresh = 0
+	while screenGui.Parent do
+		local cam = workspace.CurrentCamera
+		if cam and math.abs(cam.FieldOfView - customFOV) > 0.5 then
+			cam.FieldOfView = customFOV
+		end
+		if tick() - lastRefresh >= CONFIG.REFRESH_DELAY then
+			lastRefresh = tick()
+			pcall(updateAll)
+		end
+		task.wait(0.5)
+	end
+end)
